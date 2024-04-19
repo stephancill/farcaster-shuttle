@@ -14,7 +14,7 @@ import {
   MessageState,
 } from "../index"; // If you want to use this as a standalone app, replace this import with "@farcaster/shuttle"
 import { AppDb, migrateToLatest, Tables } from "./db";
-import { bytesToHexString, HubEvent, isCastAddMessage, isCastRemoveMessage, Message } from "@farcaster/hub-nodejs";
+import { bytesToHexString, HubEvent, isCastAddMessage, isCastRemoveMessage, Message, MessageType } from "@farcaster/hub-nodejs";
 import { log } from "./log";
 import { Command } from "@commander-js/extra-typings";
 import { readFileSync } from "fs";
@@ -53,6 +53,46 @@ export class App implements MessageHandler {
     const streamConsumer = new HubEventStreamConsumer(hub, eventStreamForRead, "all");
 
     return new App(db, redis, hubSubscriber, streamConsumer);
+  }
+
+  async handleMessagesMergeOfType(
+    messages: Message[],
+    type: MessageType,
+    txn: DB,
+    // Assume this is always merge and missed and new
+    // operation: StoreMessageOperation,
+    // state: MessageState,
+    // isNew: boolean,
+    // wasMissed: boolean,
+  ): Promise<void> {
+    const appDB = txn as unknown as AppDb; // Need this to make typescript happy, not clean way to "inherit" table types
+    
+    // Example of how to materialize casts into a separate table. Insert casts into a separate table, and mark them as deleted when removed
+    // Note that since we're relying on "state", this can sometimes be invoked twice. e.g. when a CastRemove is merged, this call will be invoked 2 twice:
+    // castAdd, operation=delete, state=deleted (the cast that the remove is removing)
+    // castRemove, operation=merge, state=deleted (the actual remove message)
+    if (type === MessageType.CAST_ADD || type === MessageType.CAST_REMOVE) {
+      const addMessages = messages.filter(isCastAddMessage);
+      const removeMessages = messages.filter(isCastRemoveMessage);
+      
+      await appDB
+        .insertInto("casts")
+        .values(
+          addMessages.map((message) => ({
+            fid: message.data.fid,
+            hash: message.hash,
+            text: message.data.castAddBody?.text || "",
+            timestamp: farcasterTimeToDate(message.data.timestamp) || new Date(),
+          })),
+        )
+        .execute();
+
+      if (removeMessages.length > 0)
+        await appDB
+          .updateTable("casts")
+          .set({ deletedAt: new Date() })
+          .where("hash", "in", removeMessages.map((m) => m.hash)).execute();
+    }
   }
 
   async handleMessageMerge(
@@ -94,7 +134,7 @@ export class App implements MessageHandler {
     }
 
     const messageDesc = wasMissed ? `missed message (${operation})` : `message (${operation})`;
-    log.info(`${state} ${messageDesc} ${bytesToHexString(message.hash)._unsafeUnwrap()} (type ${message.data?.type})`);
+    // log.info(`${state} ${messageDesc} ${bytesToHexString(message.hash)._unsafeUnwrap()} (type ${message.data?.type})`);
   }
 
   async start() {
@@ -115,16 +155,22 @@ export class App implements MessageHandler {
   }
 
   async reconcileFids(fids: number[]) {
+    log.info(`Reconciling messages for FIDs: ${fids}`)
     // biome-ignore lint/style/noNonNullAssertion: client is always initialized
     const reconciler = new MessageReconciliation(this.hubSubscriber.hubClient!, this.db, log);
     for (const fid of fids) {
-      await reconciler.reconcileMessagesForFid(fid, async (message, missingInDb, prunedInDb, revokedInDb) => {
-        if (missingInDb) {
-          await HubEventProcessor.handleMissingMessage(this.db, message, this);
-        } else if (prunedInDb || revokedInDb) {
-          const messageDesc = prunedInDb ? "pruned" : revokedInDb ? "revoked" : "existing";
-          log.info(`Reconciled ${messageDesc} message ${bytesToHexString(message.hash)._unsafeUnwrap()}`);
-        }
+      await reconciler.reconcileMessagesForFid(fid, async (messages, type) => {
+        const missingInDb = messages.filter((msg) => msg.missingInDb);
+        await HubEventProcessor.handleMissingMessagesOfType(this.db, missingInDb, type, this);
+
+        log.info(`Reconciled ${messages.length - missingInDb.length} pruned/revoked/existing messages for FID ${fid} of type ${type}`)
+        
+        // if (missingInDb) {
+        //   // await HubEventProcessor.handleMissingMessage(this.db, message, this);
+        // } else if (prunedInDb || revokedInDb) {
+        //   const messageDesc = prunedInDb ? "pruned" : revokedInDb ? "revoked" : "existing";
+        //   log.info(`Reconciled ${messageDesc} message ${bytesToHexString(message.hash)._unsafeUnwrap()}`);
+        // }
       });
     }
   }
@@ -132,7 +178,7 @@ export class App implements MessageHandler {
   async backfillFids(fids: number[], backfillQueue: Queue) {
     const startedAt = Date.now();
     if (fids.length === 0) {
-      const maxFidResult = await this.hubSubscriber.hubClient.getFids({ pageSize: 1, reverse: true });
+      const maxFidResult = await this.hubSubscriber.hubClient!.getFids({ pageSize: 1, reverse: true });
       if (maxFidResult.isErr()) {
         log.error("Failed to get max fid", maxFidResult.error);
         throw maxFidResult.error;
@@ -202,6 +248,36 @@ if (import.meta.url.endsWith(url.pathToFileURL(process.argv[1] || "").toString()
     await worker.run();
   }
 
+  async function benchmarkSingleFid() {
+    log.info(`Creating app connecting to: ${POSTGRES_URL}, ${REDIS_URL}, ${HUB_HOST}`);
+    const app = App.create(POSTGRES_URL, REDIS_URL, HUB_HOST, HUB_SSL);
+    await app.ensureMigrations();
+    const fids = BACKFILL_FIDS ? BACKFILL_FIDS.split(",").map((fid) => parseInt(fid)) : [];
+    log.info(`Benchmarking fids: ${fids}`);
+    const start = Date.now();
+    await app.reconcileFids(fids);
+    // const worker = getWorker(app, app.redis.client, log, CONCURRENCY);
+    // await worker.run();
+    const elapsed = (Date.now() - start) / 1000;
+    
+    log.info(`Reconciled ${fids.length} in ${elapsed}s`);
+  }
+
+  async function benchmarkBackfill() {
+    log.info(`Creating app connecting to: ${POSTGRES_URL}, ${REDIS_URL}, ${HUB_HOST}`);
+    const app = App.create(POSTGRES_URL, REDIS_URL, HUB_HOST, HUB_SSL);
+    await app.ensureMigrations();
+    const fids = BACKFILL_FIDS ? BACKFILL_FIDS.split(",").map((fid) => parseInt(fid)) : [];
+    log.info(`Benchmarking backfill fids: ${fids}`);
+    const backfillQueue = getQueue(app.redis.client);
+    const start = Date.now();
+    await app.backfillFids(fids, backfillQueue);
+    const worker = getWorker(app, app.redis.client, log, 1);
+    await worker.run();
+    // const elapsed = (Date.now() - start) / 1000;
+    // log.info(`Backfilled ${fids.length} in ${elapsed}s`);
+  }
+
   // for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
   //   process.on(signal, async () => {
   //     log.info(`Received ${signal}. Shutting down...`);
@@ -223,6 +299,8 @@ if (import.meta.url.endsWith(url.pathToFileURL(process.argv[1] || "").toString()
   program.command("start").description("Starts the shuttle").action(start);
   program.command("backfill").description("Queue up backfill for the worker").action(backfill);
   program.command("worker").description("Starts the backfill worker").action(worker);
+  program.command("bench-reconcile").description("Benchmark reconcile").action(benchmarkSingleFid)
+  program.command("bench-backfill").description("Benchmark backfill").action(benchmarkBackfill)
 
   program.parse(process.argv);
 }

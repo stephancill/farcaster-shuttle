@@ -10,8 +10,8 @@ services:
       - POSTGRES_DB=shuttle
       - POSTGRES_USER=shuttle
       - POSTGRES_PASSWORD=password
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
+    # volumes:
+    #   - postgres-data:/var/lib/postgresql/data
     healthcheck:
       # Need to specify name/user to avoid `FATAL: role "root" does not exist` errors in logs
       test:
@@ -33,8 +33,8 @@ services:
     image: "redis:7.2-alpine"
     restart: unless-stopped
     command: --save 1 1 --loglevel warning --maxmemory-policy noeviction
-    volumes:
-      - redis-data:/data
+    # volumes:
+    #   - redis-data:/data
     ports:
       - "6379:6379"
     healthcheck:

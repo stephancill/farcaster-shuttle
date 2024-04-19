@@ -12,6 +12,7 @@ import {
   isVerificationAddAddressMessage,
   isVerificationRemoveMessage,
   Message,
+  MessageType,
 } from "@farcaster/hub-nodejs";
 import { DB } from "./db";
 import { MessageProcessor } from "./messageProcessor";
@@ -37,6 +38,21 @@ export class HubEventProcessor {
 
   static async handleMissingMessage(db: DB, message: Message, handler: MessageHandler) {
     await this.processMessage(db, message, handler, "merge", [], true);
+  }
+
+  static async handleMissingMessagesOfType(db: DB, messages: Message[], type: MessageType, handler: MessageHandler) {
+    await this.processMessagesOfType(db, messages, type, handler, "merge");
+  }
+
+  private static async processMessagesOfType(
+    db: DB,
+    messages: Message[],
+    type: MessageType,
+    handler: MessageHandler,
+    operation: StoreMessageOperation,
+  ) {
+    await MessageProcessor.storeMessages(messages, db, log);
+    await handler.handleMessagesMergeOfType(messages, type, db);
   }
 
   private static async processMessage(

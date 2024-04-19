@@ -1,4 +1,4 @@
-import { Message } from "@farcaster/hub-nodejs";
+import { Message, MessageType } from "@farcaster/hub-nodejs";
 import { DB } from "./db";
 
 export * from "./db";
@@ -34,4 +34,10 @@ export interface MessageHandler {
     isNew: boolean,
     wasMissed: boolean,
   ): Promise<void>;
+
+  handleMessagesMergeOfType: (
+    messages: Message[],
+    type: MessageType,
+    txn: DB,
+  ) => Promise<void>;
 }
