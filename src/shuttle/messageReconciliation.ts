@@ -122,7 +122,7 @@ export class MessageReconciliation {
   }
 
   private async *getAllCastMessagesByFidInBatchesOf(fid: number, pageSize: number | undefined) {
-    let result = await this.client.getAllCastMessagesByFid({ pageSize, fid });
+    let result = await this.client.getCastsByFid({ pageSize, fid });
     for (;;) {
       if (result.isErr()) {
         throw new Error(`Unable to get all casts for FID ${fid}: ${result.error?.message}`);
@@ -133,12 +133,12 @@ export class MessageReconciliation {
       yield messages;
 
       if (!pageToken?.length) break;
-      result = await this.client.getAllCastMessagesByFid({ pageSize, pageToken, fid });
+      result = await this.client.getCastsByFid({ pageSize, pageToken, fid });
     }
   }
 
   private async *getAllReactionMessagesByFidInBatchesOf(fid: number, pageSize: number | undefined) {
-    let result = await this.client.getAllReactionMessagesByFid({ pageSize, fid });
+    let result = await this.client.getReactionsByFid({ pageSize, fid });
     for (;;) {
       if (result.isErr()) {
         throw new Error(`Unable to get all reactions for FID ${fid}: ${result.error?.message}`);
@@ -149,12 +149,12 @@ export class MessageReconciliation {
       yield messages;
 
       if (!pageToken?.length) break;
-      result = await this.client.getAllReactionMessagesByFid({ pageSize, pageToken, fid });
+      result = await this.client.getReactionsByFid({ pageSize, pageToken, fid });
     }
   }
 
   private async *getAllLinkMessagesByFidInBatchesOf(fid: number, pageSize: number | undefined) {
-    let result = await this.client.getAllLinkMessagesByFid({ pageSize, fid });
+    let result = await this.client.getLinksByFid({ pageSize, fid });
     for (;;) {
       if (result.isErr()) {
         throw new Error(`Unable to get all links for FID ${fid}: ${result.error?.message}`);
@@ -165,12 +165,12 @@ export class MessageReconciliation {
       yield messages;
 
       if (!pageToken?.length) break;
-      result = await this.client.getAllLinkMessagesByFid({ pageSize, pageToken, fid });
+      result = await this.client.getLinksByFid({ pageSize, pageToken, fid });
     }
   }
 
   private async *getAllVerificationMessagesByFidInBatchesOf(fid: number, pageSize: number | undefined) {
-    let result = await this.client.getAllVerificationMessagesByFid({ pageSize, fid });
+    let result = await this.client.getVerificationsByFid({ pageSize, fid });
     for (;;) {
       if (result.isErr()) {
         throw new Error(`Unable to get all verifications for FID ${fid}: ${result.error?.message}`);
@@ -181,12 +181,12 @@ export class MessageReconciliation {
       yield messages;
 
       if (!pageToken?.length) break;
-      result = await this.client.getAllVerificationMessagesByFid({ pageSize, pageToken, fid });
+      result = await this.client.getVerificationsByFid({ pageSize, pageToken, fid });
     }
   }
 
   private async *getAllUserDataMessagesByFidInBatchesOf(fid: number, pageSize: number | undefined) {
-    let result = await this.client.getAllUserDataMessagesByFid({ pageSize, fid });
+    let result = await this.client.getUserDataByFid({ pageSize, fid });
     for (;;) {
       if (result.isErr()) {
         throw new Error(`Unable to get all user data messages for FID ${fid}: ${result.error?.message}`);
@@ -197,7 +197,7 @@ export class MessageReconciliation {
       yield messages;
 
       if (!pageToken?.length) break;
-      result = await this.client.getAllUserDataMessagesByFid({ pageSize, pageToken, fid });
+      result = await this.client.getUserDataByFid({ pageSize, pageToken, fid });
     }
   }
 }

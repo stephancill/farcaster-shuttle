@@ -21,10 +21,14 @@ import { readFileSync } from "fs";
 import { BACKFILL_FIDS, CONCURRENCY, HUB_HOST, HUB_SSL, MAX_FID, POSTGRES_URL, REDIS_URL } from "./env";
 import * as process from "node:process";
 import url from "node:url";
-import { ok, Result } from "neverthrow";
+import { ok } from "neverthrow";
 import { getQueue, getWorker } from "./worker";
 import { Queue } from "bullmq";
-import { farcasterTimeToDate } from "../utils";
+import { deleteCasts, insertCasts } from "./processors/cast";
+import { deleteVerifications, insertVerifications } from "./processors/verification";
+import { insertUserDatas } from "./processors/user-data";
+import { deleteReactions, insertReactions } from "./processors/reaction";
+import { deleteLinks, insertLinks } from "./processors/link";
 
 const hubId = "shuttle";
 
@@ -55,6 +59,28 @@ export class App implements MessageHandler {
     return new App(db, redis, hubSubscriber, streamConsumer);
   }
 
+  static async processMessagesOfType(messages: Message[], type: MessageType, db: AppDb): Promise<void> {
+    if (type === MessageType.CAST_ADD) {
+      await insertCasts(messages, db)
+    } else if (type === MessageType.CAST_REMOVE) {
+      await deleteCasts(messages, db)
+    } else if (type === MessageType.VERIFICATION_ADD_ETH_ADDRESS) {
+      await insertVerifications(messages, db)
+    } else if (type === MessageType.VERIFICATION_REMOVE) {
+      await deleteVerifications(messages, db)
+    } else if (type === MessageType.USER_DATA_ADD) {
+      await insertUserDatas(messages, db)
+    } else if (type === MessageType.REACTION_ADD) {
+      await insertReactions(messages, db)
+    } else if (type === MessageType.REACTION_REMOVE) {
+      await deleteReactions(messages, db)
+    } else if (type === MessageType.LINK_ADD) {
+      await insertLinks(messages, db)
+    } else if (type === MessageType.LINK_REMOVE) {
+      await deleteLinks(messages, db)
+    }
+  }
+
   async handleMessagesMergeOfType(
     messages: Message[],
     type: MessageType,
@@ -65,35 +91,8 @@ export class App implements MessageHandler {
     // isNew: boolean,
     // wasMissed: boolean,
   ): Promise<void> {
-    const appDB = txn as unknown as AppDb; // Need this to make typescript happy, not clean way to "inherit" table types
-    
-    // Example of how to materialize casts into a separate table. Insert casts into a separate table, and mark them as deleted when removed
-    // Note that since we're relying on "state", this can sometimes be invoked twice. e.g. when a CastRemove is merged, this call will be invoked 2 twice:
-    // castAdd, operation=delete, state=deleted (the cast that the remove is removing)
-    // castRemove, operation=merge, state=deleted (the actual remove message)
-    if (type === MessageType.CAST_ADD || type === MessageType.CAST_REMOVE) {
-      const addMessages = messages.filter(isCastAddMessage);
-      const removeMessages = messages.filter(isCastRemoveMessage);
-      
-      if (addMessages.length > 0)
-      await appDB
-        .insertInto("casts")
-        .values(
-          addMessages.map((message) => ({
-            fid: message.data.fid,
-            hash: message.hash,
-            text: message.data.castAddBody?.text || "",
-            timestamp: farcasterTimeToDate(message.data.timestamp) || new Date(),
-          })),
-        )
-        .execute();
-
-      if (removeMessages.length > 0)
-        await appDB
-          .updateTable("casts")
-          .set({ deletedAt: new Date() })
-          .where("hash", "in", removeMessages.map((m) => m.hash)).execute();
-    }
+    const appDB = txn as unknown as AppDb;
+    await App.processMessagesOfType(messages, type, appDB)
   }
 
   async handleMessageMerge(
@@ -115,27 +114,8 @@ export class App implements MessageHandler {
     // Note that since we're relying on "state", this can sometimes be invoked twice. e.g. when a CastRemove is merged, this call will be invoked 2 twice:
     // castAdd, operation=delete, state=deleted (the cast that the remove is removing)
     // castRemove, operation=merge, state=deleted (the actual remove message)
-    const isCastMessage = isCastAddMessage(message) || isCastRemoveMessage(message);
-    if (isCastMessage && state === "created") {
-      await appDB
-        .insertInto("casts")
-        .values({
-          fid: message.data.fid,
-          hash: message.hash,
-          text: message.data.castAddBody?.text || "",
-          timestamp: farcasterTimeToDate(message.data.timestamp) || new Date(),
-        })
-        .execute();
-    } else if (isCastMessage && state === "deleted") {
-      await appDB
-        .updateTable("casts")
-        .set({ deletedAt: farcasterTimeToDate(message.data.timestamp) || new Date() })
-        .where("hash", "=", message.hash)
-        .execute();
-    }
-
-    const messageDesc = wasMissed ? `missed message (${operation})` : `message (${operation})`;
-    // log.info(`${state} ${messageDesc} ${bytesToHexString(message.hash)._unsafeUnwrap()} (type ${message.data?.type})`);
+    if (message.data?.type)
+      await App.processMessagesOfType([message], message.data?.type, appDB)
   }
 
   async start() {
@@ -156,7 +136,7 @@ export class App implements MessageHandler {
   }
 
   async reconcileFids(fids: number[]) {
-    log.info(`Reconciling messages for FIDs: ${fids}`)
+    // log.info(`Reconciling messages for FIDs: ${fids}`)
     // biome-ignore lint/style/noNonNullAssertion: client is always initialized
     const reconciler = new MessageReconciliation(this.hubSubscriber.hubClient!, this.db, log);
     for (const fid of fids) {
