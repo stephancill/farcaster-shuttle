@@ -28,6 +28,8 @@ export class MessageProcessor {
       } as InsertableMessageRow
     })
 
+    if (validMessages.length === 0) return;
+
     await trx
       .insertInto("messages")
       .values(validMessages)

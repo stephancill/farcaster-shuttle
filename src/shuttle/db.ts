@@ -145,12 +145,15 @@ export const getDbClient = (connectionString?: string) => {
   return new Kysely<HubTables>({
     dialect: new PostgresDialect({
       pool: new Pool({
-        max: 10,
+        max: 20,
         connectionString,
+        // long query timeouts required for many workers
+        query_timeout: 1_000_000, 
       }),
       cursor: Cursor,
     }),
     plugins: [new CamelCasePlugin()],
+    log: ['error'],
   });
 };
 

@@ -8,17 +8,22 @@ However, database schema is stable and will not change (except for addition of n
 
 ## Stephan's contributions
 
-- Batch messages by type and fid
+- Batch messages by type and fid for backfilling
+- Benchmark different values for concurrency (see `benchmark_results_1000_combined.csv`)
+- Sets a high `query_timeout` for DB connection and increases the `max` pool size to 20 to prevent dropping inserts due to connection timeout
 - Benchmarks
   - 23x speedup for backfilling FID 3
-  - Backfills first 2000 FIDs in 9.96 minutes
+  - Backfills first 2000 FIDs in 312 seconds with CONCURRENCY=1
+  - Backfills first 1000 FIDs in 80 seconds with CONCURRENCY=8
+
+* Tests run on an MacBook M1 Pro
 
 ```
-docker-compose down && docker-compose up -d && FIDS=3 yarn start bench-reconcile
+docker-compose down -v && docker-compose up -d && FIDS=3 yarn start bench-reconcile
 ```
 
 ```
-docker-compose down && docker-compose up -d && MAX_FID=2000 yarn start bench-backfill
+docker-compose down -v && docker-compose up -d && MAX_FID=1000 CONCURRENCY=8 yarn start bench-backfill
 ```
 
 ## Architecture
