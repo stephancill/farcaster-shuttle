@@ -32,7 +32,7 @@ services:
   redis:
     image: "redis:7.2-alpine"
     restart: unless-stopped
-    command: --save 1 1 --loglevel warning --maxmemory-policy noeviction
+    command: --loglevel warning --maxmemory-policy noeviction
     # volumes:
     #   - redis-data:/data
     ports:
@@ -46,9 +46,9 @@ services:
     networks:
       - shuttle-network
 
-volumes:
-  postgres-data:
-  redis-data:
+# volumes:
+#   postgres-data:
+#   redis-data:
 
 networks:
   shuttle-network:

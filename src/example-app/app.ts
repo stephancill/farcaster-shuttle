@@ -29,7 +29,7 @@ import { farcasterTimeToDate } from "../utils";
 const hubId = "shuttle";
 
 export class App implements MessageHandler {
-  private readonly db: DB;
+  public readonly db: DB;
   private hubSubscriber: HubSubscriber;
   private streamConsumer: HubEventStreamConsumer;
   public redis: RedisClient;
@@ -75,6 +75,7 @@ export class App implements MessageHandler {
       const addMessages = messages.filter(isCastAddMessage);
       const removeMessages = messages.filter(isCastRemoveMessage);
       
+      if (addMessages.length > 0)
       await appDB
         .insertInto("casts")
         .values(
@@ -162,15 +163,6 @@ export class App implements MessageHandler {
       await reconciler.reconcileMessagesForFid(fid, async (messages, type) => {
         const missingInDb = messages.filter((msg) => msg.missingInDb);
         await HubEventProcessor.handleMissingMessagesOfType(this.db, missingInDb, type, this);
-
-        log.info(`Reconciled ${messages.length - missingInDb.length} pruned/revoked/existing messages for FID ${fid} of type ${type}`)
-        
-        // if (missingInDb) {
-        //   // await HubEventProcessor.handleMissingMessage(this.db, message, this);
-        // } else if (prunedInDb || revokedInDb) {
-        //   const messageDesc = prunedInDb ? "pruned" : revokedInDb ? "revoked" : "existing";
-        //   log.info(`Reconciled ${messageDesc} message ${bytesToHexString(message.hash)._unsafeUnwrap()}`);
-        // }
       });
     }
   }
@@ -272,7 +264,27 @@ if (import.meta.url.endsWith(url.pathToFileURL(process.argv[1] || "").toString()
     const backfillQueue = getQueue(app.redis.client);
     const start = Date.now();
     await app.backfillFids(fids, backfillQueue);
-    const worker = getWorker(app, app.redis.client, log, 1);
+    const worker = getWorker(app, app.redis.client, log, CONCURRENCY);
+
+    async function checkQueueAndExecute() {
+      const queue = getQueue(app.redis.client)
+      const count = await queue.getActiveCount()
+      if (count === 0) {
+        // Get total rows in cast table
+        const rows = await (app.db as unknown as AppDb).selectFrom('casts').execute()
+
+        const elapsed = (Date.now() - start) / 1000;
+        log.info(`[benchmark complete] ${elapsed},${rows.length}`); 
+
+
+        process.exit(0)
+      }
+    }
+
+    setInterval(() => {
+      checkQueueAndExecute()
+    }, 1000); // Checks every second
+
     await worker.run();
     // const elapsed = (Date.now() - start) / 1000;
     // log.info(`Backfilled ${fids.length} in ${elapsed}s`);
