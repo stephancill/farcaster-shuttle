@@ -1,24 +1,13 @@
 {
-  "name": "@farcaster/shuttle",
+  "name": "farcaster-indexer",
   "version": "0.2.3",
-  "main": "./dist/index.js",
-  "module": "./dist/index.mjs",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "require": "./dist/index.js",
-      "import": "./dist/index.mjs",
-      "types": "./dist/index.d.ts"
-    }
-  },
-  "files": [
-    "dist"
-  ],
   "license": "MIT",
   "dependencies": {
     "@commander-js/extra-typings": "^12.0.1",
     "@farcaster/hub-nodejs": "^0.11.9",
+    "@farcaster/shuttle": "^0.2.0",
     "@figma/hot-shots": "^9.0.0-figma.1",
+    "bullmq": "^5.7.4",
     "commander": "^11.0.0",
     "ioredis": "^5.3.2",
     "kysely": "^0.27.3",
@@ -32,7 +21,7 @@
   },
   "scripts": {
     "build": "tsup --config tsup.config.ts",
-    "start": "tsx src/example-app/app.ts",
+    "start": "tsx src/app.ts",
     "clean": "rimraf ./dist",
     "lint": "biome format src/ --write && biome check src/ --apply",
     "lint:ci": "biome ci src/",
@@ -45,8 +34,8 @@
     "@types/node": "^20.11.30",
     "@types/pg": "^8.10.3",
     "@types/pg-cursor": "^2.7.0",
-    "bullmq": "^5.7.1",
     "dotenv": "^16.4.5",
-    "tsx": "^4.7.2"
+    "tsx": "^4.7.2",
+    "typescript": "^5.4.5"
   }
 }
