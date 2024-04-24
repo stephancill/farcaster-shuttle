@@ -26,6 +26,10 @@ docker-compose down -v && docker-compose up -d && FIDS=3 yarn start bench-reconc
 docker-compose down -v && docker-compose up -d && MAX_FID=1000 CONCURRENCY=8 yarn start bench-backfill
 ```
 
+Remaining issues
+- Subscriber deadlocks
+- Reconciler only fetches add messages, not deletes/prunes
+
 ## Architecture
 
 ![Architecture](./architecture.jpg)
