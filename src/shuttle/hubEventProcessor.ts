@@ -65,15 +65,21 @@ export class HubEventProcessor {
   ) {
     await db.transaction().execute(async (trx) => {
       if (deletedMessages.length > 0) {
-        await Promise.all(
-          deletedMessages.map(async (deletedMessage) => {
-            const isNew = await MessageProcessor.storeMessage(deletedMessage, trx, "delete", log);
-            const state = this.getMessageState(deletedMessage, "delete");
-            await handler.handleMessageMerge(deletedMessage, trx, "delete", state, isNew, wasMissed);
-          }),
-        );
+        for (const deletedMessage of deletedMessages) {
+          const isNew = await MessageProcessor.storeMessage(deletedMessage, trx, "delete", log);
+
+          if (isNew === null)
+            continue;
+
+          const state = this.getMessageState(deletedMessage, "delete");
+          // Log info and handle the message if needed
+          // log.info(`Handling deleted message ${deletedMessage.data?.fid}`)
+          await handler.handleMessageMerge(deletedMessage, trx, "delete", state, isNew, wasMissed);
+        }
       }
       const isNew = await MessageProcessor.storeMessage(message, trx, operation, log);
+      if (isNew === null)
+        return;
       const state = this.getMessageState(message, operation);
       await handler.handleMessageMerge(message, trx, operation, state, isNew, wasMissed);
     });

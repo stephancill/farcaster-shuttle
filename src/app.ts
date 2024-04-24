@@ -92,7 +92,9 @@ export class App implements MessageHandler {
     // wasMissed: boolean,
   ): Promise<void> {
     const appDB = txn as unknown as AppDb;
-    await App.processMessagesOfType(messages, type, appDB)
+
+    if (messages.length > 0) 
+      await App.processMessagesOfType(messages, type, appDB);
   }
 
   async handleMessageMerge(
@@ -148,6 +150,7 @@ export class App implements MessageHandler {
   }
 
   async backfillFids(fids: number[], backfillQueue: Queue) {
+    await this.ensureMigrations();
     const startedAt = Date.now();
     if (fids.length === 0) {
       const maxFidResult = await this.hubSubscriber.hubClient!.getFids({ pageSize: 1, reverse: true });
@@ -173,6 +176,7 @@ export class App implements MessageHandler {
     }
     await backfillQueue.add("completionMarker", { startedAt });
     log.info("Backfill jobs queued");
+    process.exit(0);
   }
 
   private async processHubEvent(hubEvent: HubEvent) {

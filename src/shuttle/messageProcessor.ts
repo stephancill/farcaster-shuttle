@@ -11,7 +11,11 @@ export class MessageProcessor {
     // operation: StoreMessageOperation = "merge",
     log: pino.Logger | undefined = undefined,
   ) {
-    const validMessages = messages.map(message => {
+    const validationResults = await Promise.all(messages.map(async m =>{
+      const result = await validations.validateMessage(m)
+      return {message: m, isErr: !result.isErr()}
+    }));
+    const validMessages = validationResults.map(({message}) => {
       const valid = true // validations.validateMessage(m);
       const body = convertProtobufMessageBodyToJson(message);
 
@@ -68,7 +72,7 @@ export class MessageProcessor {
     trx: DB,
     operation: StoreMessageOperation = "merge",
     log: pino.Logger | undefined = undefined,
-  ): Promise<boolean> {
+  ): Promise<boolean | null> {
     // const log = createLogger(messageLogData(message));
     // if (ENVIRONMENT === "prod" && message.data?.network !== FC_NETWORK_ID) {
     //   throw new BadRequestError(
@@ -79,7 +83,8 @@ export class MessageProcessor {
     const validation = await validations.validateMessage(message);
     if (validation.isErr()) {
       log?.warn(`Invalid message ${bytesToHex(message.hash)}: ${validation.error.message}`);
-      throw new Error(`Invalid message: ${validation.error.message}`);
+      // throw new Error(`Invalid message: ${validation.error.message}`);
+      return null
     }
 
     if (!message.data) throw new Error("Message data is missing");
