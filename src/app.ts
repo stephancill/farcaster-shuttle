@@ -18,7 +18,7 @@ import { bytesToHexString, HubEvent, isCastAddMessage, isCastRemoveMessage, Mess
 import { log } from "./log";
 import { Command } from "@commander-js/extra-typings";
 import { readFileSync } from "fs";
-import { BACKFILL_FIDS, CONCURRENCY, HUB_HOST, HUB_SSL, MAX_FID, POSTGRES_URL, REDIS_URL } from "./env";
+import { BACKFILL_FIDS, CONCURRENCY, FETCH_CONCURRENCY, HUB_HOST, HUB_SSL, MAX_FID, POSTGRES_URL, REDIS_URL } from "./env";
 import * as process from "node:process";
 import url from "node:url";
 import { ok } from "neverthrow";
@@ -32,7 +32,8 @@ import { deleteLinks, insertLinks } from "./processors/link";
 import { getFrame, getFrameFlattened } from "frames.js";
 import ogs from "open-graph-scraper";
 import normalizeUrl from "./normalizeUrl";
-import { INDEX_URL_JOB_NAME, getUrlQueue, getUrlWorker } from "./urlWorker";
+import { INDEX_URL_JOB_NAME, UNBATCH_JOB_NAME, getUnbatchWorker, getUrlBatchQueue, getUrlQueue, getUrlWorker } from "./urlWorker";
+import { IndexerQueue } from "./indexerQueue";
 
 
 const hubId = "shuttle";
@@ -43,13 +44,15 @@ export class App implements MessageHandler {
   private streamConsumer: HubEventStreamConsumer;
   public redis: RedisClient;
   private readonly hubId;
+  public urlIndexer: IndexerQueue;
 
-  constructor(db: DB, redis: RedisClient, hubSubscriber: HubSubscriber, streamConsumer: HubEventStreamConsumer) {
+  constructor(db: DB, redis: RedisClient, hubSubscriber: HubSubscriber, streamConsumer: HubEventStreamConsumer, urlIndexer: IndexerQueue) {
     this.db = db;
     this.redis = redis;
     this.hubSubscriber = hubSubscriber;
     this.hubId = hubId;
     this.streamConsumer = streamConsumer;
+    this.urlIndexer = urlIndexer;
   }
 
   static create(dbUrl: string, redisUrl: string, hubUrl: string, hubSSL = false) {
@@ -60,14 +63,15 @@ export class App implements MessageHandler {
     const eventStreamForRead = new EventStreamConnection(redis.client);
     const hubSubscriber = new EventStreamHubSubscriber(hubId, hub, eventStreamForWrite, redis, "all", log);
     const streamConsumer = new HubEventStreamConsumer(hub, eventStreamForRead, "all");
+    const urlIndexer = new IndexerQueue(db as unknown as AppDb, log);
 
-    return new App(db, redis, hubSubscriber, streamConsumer);
+    return new App(db, redis, hubSubscriber, streamConsumer, urlIndexer);
   }
 
   async processMessagesOfType(messages: Message[], type: MessageType, db: AppDb): Promise<void> {
     if (type === MessageType.CAST_ADD) {
-      this.processCastEmbeds(messages)
       await insertCasts(messages, db)
+      await this.processCastEmbeds(messages, db, this.urlIndexer)
     } else if (type === MessageType.CAST_REMOVE) {
       await deleteCasts(messages, db)
     } else if (type === MessageType.VERIFICATION_ADD_ETH_ADDRESS) {
@@ -155,99 +159,32 @@ export class App implements MessageHandler {
     }
   }
 
-  async processCastEmbeds(messages: Message[]) {
-    const castAddMessages = messages.filter(isCastAddMessage)
-    const embeds = castAddMessages.map((msg) => msg.data?.castAddBody?.embeds || []).flat().filter(embed => "url" in embed)
-    const queue = getUrlQueue(this.redis.client);
-    await queue.add(INDEX_URL_JOB_NAME, { urls: embeds });
-  }
+  async processCastEmbeds(
+    messages: Message[],
+    db: AppDb,
+    urlQueue: IndexerQueue
+  ) {
+    const castAddMessages = messages.filter(isCastAddMessage);
+    const urlEmbeds = castAddMessages
+    .map((msg) => msg.data?.castAddBody?.embeds.map(e => ({castHash: msg.hash, embed: e})) || [])
+    .flat()
+    .filter(({embed}) => "url" in embed && embed.url)
 
-  async indexUrl(url: string) {
-    const appDB = this.db as unknown as AppDb; // Need this to make typescript happy, not clean way to "inherit" table types
+    await Promise.all(
+      urlEmbeds
+        .map(async ({ embed }) => await urlQueue.push(embed.url!))
+    );
 
-    // Already indexed within the last 24 hours
-    const alreadyIndexed = await appDB
-      .selectFrom("urlMetadata")
-      .where("url", "=", url)
-      .where("updatedAt", ">", new Date(Date.now() - 24 * 60 * 60 * 1000))
-      .execute()
-      .then((res) => res.length > 0);
+    let start = Date.now();
 
-    if (alreadyIndexed) {
-      log.info(`[URL Indexer] Skipping ${url} since it's already indexed`);
-      return
-    }
+    await db.insertInto("castEmbedUrls").values(urlEmbeds.map(({ embed, castHash }) => {
+      return {
+        castHash,
+        url: embed.url!,
+      };
+    })).execute()
 
-    const startTime = Date.now();
-      const res = await fetch(url);
-
-      if (!res.ok) {
-        log.error(`[URL Indexer] Failed to fetch ${url}`);
-        return
-      }
-
-    const endTime = Date.now();
-    const text = await res.text();
-
-    const openframes = getFrame({
-      htmlString: text,
-      url: url,
-      specification: "openframes",
-    });
-    const farcasterFrames = getFrame({
-      htmlString: text,
-      url: url,
-      specification: "farcaster",
-    });
-    const opengraph = await ogs({ url: url, html: text });
-    const opengraphColumn = !opengraph.error ? opengraph.result : null;
-
-    let frameFlattened: Record<string, string> | null = null;
-
-    if (openframes.status === "success") {
-      frameFlattened = getFrameFlattened(openframes.frame) as Record<
-        string,
-        string
-      >;
-    } else if (farcasterFrames.status === "success") {
-      frameFlattened = getFrameFlattened(farcasterFrames.frame) as Record<
-        string,
-        string
-      >;
-    }
-
-    if (!frameFlattened) {
-      log.info(`[URL Indexer] No frame found for ${url}`);
-      return
-    }
-
-    const performance = {
-      responseTime: endTime - startTime,
-    }
-
-    const normalizedUrl = normalizeUrl(url, {
-      forceHttps: true,
-      stripWWW: false,
-      stripHash: true,
-    })
-
-    // Upsert the metadata
-    await appDB
-      .insertInto("urlMetadata")
-      .values({
-        url: url,
-        normalizedUrl: normalizedUrl,
-        opengraph: opengraphColumn,
-        frameFlattened: frameFlattened,
-        performance: performance,
-      })
-      .onConflict((oc) => oc.column("url").doUpdateSet({
-        normalizedUrl: normalizedUrl,
-        opengraph: opengraphColumn,
-        frameFlattened: frameFlattened,
-        performance: performance,
-      }))
-      .execute();
+    log.info(`Inserted ${urlEmbeds.length} cast embeds in ${Date.now() - start}ms`);
   }
 
   async backfillFids(fids: number[], backfillQueue: Queue) {
@@ -327,59 +264,11 @@ if (import.meta.url.endsWith(url.pathToFileURL(process.argv[1] || "").toString()
   async function urlWorker() {
     log.info(`Creating app connecting to: ${POSTGRES_URL}, ${REDIS_URL}, ${HUB_HOST}`);
     const app = App.create(POSTGRES_URL, REDIS_URL, HUB_HOST, HUB_SSL);
-    const worker = getUrlWorker(app, app.redis.client, log, CONCURRENCY);
+    const unbatchWorker = getUnbatchWorker(app.redis.client);
+    unbatchWorker.run();
+    log.info("Unbatch worker started");
+    const worker = getUrlWorker(app, app.redis.client, log, FETCH_CONCURRENCY);
     await worker.run();
-  }
-
-  async function benchmarkSingleFid() {
-    log.info(`Creating app connecting to: ${POSTGRES_URL}, ${REDIS_URL}, ${HUB_HOST}`);
-    const app = App.create(POSTGRES_URL, REDIS_URL, HUB_HOST, HUB_SSL);
-    await app.ensureMigrations();
-    const fids = BACKFILL_FIDS ? BACKFILL_FIDS.split(",").map((fid) => parseInt(fid)) : [];
-    log.info(`Benchmarking fids: ${fids}`);
-    const start = Date.now();
-    await app.reconcileFids(fids);
-    // const worker = getWorker(app, app.redis.client, log, CONCURRENCY);
-    // await worker.run();
-    const elapsed = (Date.now() - start) / 1000;
-    log.info(`Reconciled ${fids.length} in ${elapsed}s`);
-
-    process.exit(0)
-  }
-
-  async function benchmarkBackfill() {
-    log.info(`Creating app connecting to: ${POSTGRES_URL}, ${REDIS_URL}, ${HUB_HOST}`);
-    const app = App.create(POSTGRES_URL, REDIS_URL, HUB_HOST, HUB_SSL);
-    await app.ensureMigrations();
-    const fids = BACKFILL_FIDS ? BACKFILL_FIDS.split(",").map((fid) => parseInt(fid)) : [];
-    log.info(`Benchmarking backfill fids: ${fids}`);
-    const backfillQueue = getQueue(app.redis.client);
-    const start = Date.now();
-    await app.backfillFids(fids, backfillQueue);
-    const worker = getWorker(app, app.redis.client, log, CONCURRENCY);
-
-    async function checkQueueAndExecute() {
-      const queue = getQueue(app.redis.client)
-      const count = await queue.getActiveCount()
-      if (count === 0) {
-        // Get total rows in cast table
-        const rows = await (app.db as unknown as AppDb).selectFrom('casts').execute()
-
-        const elapsed = (Date.now() - start) / 1000;
-        log.info(`[benchmark complete] ${elapsed},${rows.length}`); 
-
-
-        process.exit(0)
-      }
-    }
-
-    setInterval(() => {
-      checkQueueAndExecute()
-    }, 1000); // Checks every second
-
-    await worker.run();
-    // const elapsed = (Date.now() - start) / 1000;
-    // log.info(`Backfilled ${fids.length} in ${elapsed}s`);
   }
 
   // for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
@@ -404,8 +293,6 @@ if (import.meta.url.endsWith(url.pathToFileURL(process.argv[1] || "").toString()
   program.command("backfill").description("Queue up backfill for the worker").action(backfill);
   program.command("worker").description("Starts the backfill worker").action(worker);
   program.command("url-worker").description("Starts the url worker").action(urlWorker);
-  program.command("bench-reconcile").description("Benchmark reconcile").action(benchmarkSingleFid)
-  program.command("bench-backfill").description("Benchmark backfill").action(benchmarkBackfill)
 
   program.parse(process.argv);
 }

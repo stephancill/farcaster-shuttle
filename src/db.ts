@@ -197,7 +197,14 @@ type UrlMetadataRow = {
   updatedAt?: Date;
   opengraph?: OgObject | null;
   frameFlattened?: Record<string, string> | null;
-  performance?: Record<string, any> | null;
+  benchmark?: Record<string, any> | null;
+  responseStatus?: number;
+};
+
+// CAST EMBEDS
+export type CastEmbedUrlRow = {
+  castHash: Uint8Array;
+  url: string;
 };
 
 // ALL TABLES --------------------------------------------------------------------------------------
@@ -211,6 +218,7 @@ export interface Tables extends HubTables {
   userData: UserDataRow;
   events: EventRow;
   urlMetadata: UrlMetadataRow;
+  castEmbedUrls: CastEmbedUrlRow;
 }
 
 export type AppDb = Kysely<Tables>;
