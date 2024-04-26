@@ -29,6 +29,11 @@ import { deleteVerifications, insertVerifications } from "./processors/verificat
 import { insertUserDatas } from "./processors/user-data";
 import { deleteReactions, insertReactions } from "./processors/reaction";
 import { deleteLinks, insertLinks } from "./processors/link";
+import { getFrame, getFrameFlattened } from "frames.js";
+import ogs from "open-graph-scraper";
+import normalizeUrl from "./normalizeUrl";
+import { INDEX_URL_JOB_NAME, getUrlQueue, getUrlWorker } from "./urlWorker";
+
 
 const hubId = "shuttle";
 
@@ -59,8 +64,9 @@ export class App implements MessageHandler {
     return new App(db, redis, hubSubscriber, streamConsumer);
   }
 
-  static async processMessagesOfType(messages: Message[], type: MessageType, db: AppDb): Promise<void> {
+  async processMessagesOfType(messages: Message[], type: MessageType, db: AppDb): Promise<void> {
     if (type === MessageType.CAST_ADD) {
+      this.processCastEmbeds(messages)
       await insertCasts(messages, db)
     } else if (type === MessageType.CAST_REMOVE) {
       await deleteCasts(messages, db)
@@ -94,7 +100,7 @@ export class App implements MessageHandler {
     const appDB = txn as unknown as AppDb;
 
     if (messages.length > 0) 
-      await App.processMessagesOfType(messages, type, appDB);
+      await this.processMessagesOfType(messages, type, appDB);
   }
 
   async handleMessageMerge(
@@ -117,7 +123,7 @@ export class App implements MessageHandler {
     // castAdd, operation=delete, state=deleted (the cast that the remove is removing)
     // castRemove, operation=merge, state=deleted (the actual remove message)
     if (message.data?.type)
-      await App.processMessagesOfType([message], message.data?.type, appDB)
+      await this.processMessagesOfType([message], message.data?.type, appDB)
   }
 
   async start() {
@@ -147,6 +153,101 @@ export class App implements MessageHandler {
         await HubEventProcessor.handleMissingMessagesOfType(this.db, missingInDb, type, this);
       });
     }
+  }
+
+  async processCastEmbeds(messages: Message[]) {
+    const castAddMessages = messages.filter(isCastAddMessage)
+    const embeds = castAddMessages.map((msg) => msg.data?.castAddBody?.embeds || []).flat().filter(embed => "url" in embed)
+    const queue = getUrlQueue(this.redis.client);
+    await queue.add(INDEX_URL_JOB_NAME, { urls: embeds });
+  }
+
+  async indexUrl(url: string) {
+    const appDB = this.db as unknown as AppDb; // Need this to make typescript happy, not clean way to "inherit" table types
+
+    // Already indexed within the last 24 hours
+    const alreadyIndexed = await appDB
+      .selectFrom("urlMetadata")
+      .where("url", "=", url)
+      .where("updatedAt", ">", new Date(Date.now() - 24 * 60 * 60 * 1000))
+      .execute()
+      .then((res) => res.length > 0);
+
+    if (alreadyIndexed) {
+      log.info(`[URL Indexer] Skipping ${url} since it's already indexed`);
+      return
+    }
+
+    const startTime = Date.now();
+      const res = await fetch(url);
+
+      if (!res.ok) {
+        log.error(`[URL Indexer] Failed to fetch ${url}`);
+        return
+      }
+
+    const endTime = Date.now();
+    const text = await res.text();
+
+    const openframes = getFrame({
+      htmlString: text,
+      url: url,
+      specification: "openframes",
+    });
+    const farcasterFrames = getFrame({
+      htmlString: text,
+      url: url,
+      specification: "farcaster",
+    });
+    const opengraph = await ogs({ url: url, html: text });
+    const opengraphColumn = !opengraph.error ? opengraph.result : null;
+
+    let frameFlattened: Record<string, string> | null = null;
+
+    if (openframes.status === "success") {
+      frameFlattened = getFrameFlattened(openframes.frame) as Record<
+        string,
+        string
+      >;
+    } else if (farcasterFrames.status === "success") {
+      frameFlattened = getFrameFlattened(farcasterFrames.frame) as Record<
+        string,
+        string
+      >;
+    }
+
+    if (!frameFlattened) {
+      log.info(`[URL Indexer] No frame found for ${url}`);
+      return
+    }
+
+    const performance = {
+      responseTime: endTime - startTime,
+    }
+
+    const normalizedUrl = normalizeUrl(url, {
+      forceHttps: true,
+      stripWWW: false,
+      stripHash: true,
+    })
+
+    // Upsert the metadata
+    await appDB
+      .insertInto("urlMetadata")
+      .values({
+        url: url,
+        normalizedUrl: normalizedUrl,
+        opengraph: opengraphColumn,
+        frameFlattened: frameFlattened,
+        performance: performance,
+      })
+      .onConflict((oc) => oc.column("url").doUpdateSet({
+        normalizedUrl: normalizedUrl,
+        opengraph: opengraphColumn,
+        frameFlattened: frameFlattened,
+        performance: performance,
+      }))
+      .execute();
   }
 
   async backfillFids(fids: number[], backfillQueue: Queue) {
@@ -223,6 +324,13 @@ if (import.meta.url.endsWith(url.pathToFileURL(process.argv[1] || "").toString()
     await worker.run();
   }
 
+  async function urlWorker() {
+    log.info(`Creating app connecting to: ${POSTGRES_URL}, ${REDIS_URL}, ${HUB_HOST}`);
+    const app = App.create(POSTGRES_URL, REDIS_URL, HUB_HOST, HUB_SSL);
+    const worker = getUrlWorker(app, app.redis.client, log, CONCURRENCY);
+    await worker.run();
+  }
+
   async function benchmarkSingleFid() {
     log.info(`Creating app connecting to: ${POSTGRES_URL}, ${REDIS_URL}, ${HUB_HOST}`);
     const app = App.create(POSTGRES_URL, REDIS_URL, HUB_HOST, HUB_SSL);
@@ -295,6 +403,7 @@ if (import.meta.url.endsWith(url.pathToFileURL(process.argv[1] || "").toString()
   program.command("start").description("Starts the shuttle").action(start);
   program.command("backfill").description("Queue up backfill for the worker").action(backfill);
   program.command("worker").description("Starts the backfill worker").action(worker);
+  program.command("url-worker").description("Starts the url worker").action(urlWorker);
   program.command("bench-reconcile").description("Benchmark reconcile").action(benchmarkSingleFid)
   program.command("bench-backfill").description("Benchmark backfill").action(benchmarkBackfill)
 

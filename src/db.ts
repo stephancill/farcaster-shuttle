@@ -19,6 +19,7 @@ import {
   UserDataType,
   UserNameType,
 } from "@farcaster/hub-nodejs";
+import { OgObject } from "open-graph-scraper/dist/lib/types";
 
 const createMigrator = async (db: Kysely<HubTables>, log: Logger) => {
   const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -188,6 +189,17 @@ type EventRow = {
   id: number;
 };
 
+// URL METADATA
+type UrlMetadataRow = {
+  url: string;
+  normalizedUrl: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+  opengraph?: OgObject | null;
+  frameFlattened?: Record<string, string> | null;
+  performance?: Record<string, any> | null;
+};
+
 // ALL TABLES --------------------------------------------------------------------------------------
 export interface Tables extends HubTables {
   fnames: FnameRow;
@@ -198,6 +210,7 @@ export interface Tables extends HubTables {
   verifications: VerificationRow;
   userData: UserDataRow;
   events: EventRow;
+  urlMetadata: UrlMetadataRow;
 }
 
 export type AppDb = Kysely<Tables>;

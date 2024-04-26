@@ -96,6 +96,7 @@ export class MessageReconciliation {
   }
 
   private async *allHubMessagesOfTypeForFid(fid: number, type: MessageType) {
+    let start = Date.now()
     let fn;
     switch (type) {
       case MessageType.CAST_ADD:
@@ -117,6 +118,7 @@ export class MessageReconciliation {
         throw `Unknown message type ${type}`;
     }
     for await (const messages of fn.call(this, fid, MAX_PAGE_SIZE)) {
+      this.log.info(`Got ${messages.length} messages of type ${type} for FID ${fid} in ${Date.now() - start}ms`);
       yield messages as Message[];
     }
   }
