@@ -176,7 +176,6 @@ export class App implements MessageHandler {
     }
     await backfillQueue.add("completionMarker", { startedAt });
     log.info("Backfill jobs queued");
-    process.exit(0);
   }
 
   private async processHubEvent(hubEvent: HubEvent) {
