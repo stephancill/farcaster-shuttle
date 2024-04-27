@@ -127,10 +127,10 @@
   resolved "https://registry.yarnpkg.com/@esbuild/win32-x64/-/win32-x64-0.19.12.tgz#c57c8afbb4054a3ab8317591a0b7320360b444ae"
   integrity sha512-T1QyPSDCyMXaO3pzBkF96E8xMkiRYbUEZADd29SyPGabqxMViNoii+NcK7eWJAEoU6RZyEm5lVSIjTmcdoB9HA==
 
-"@farcaster/core@0.14.9":
-  version "0.14.9"
-  resolved "https://registry.yarnpkg.com/@farcaster/core/-/core-0.14.9.tgz#c0304aa11361db3dac22c9d6acbfa971c7c2c677"
-  integrity sha512-1Bk8mMrgDBTfE9AoNvJydhb6xz2CWePtB5i1DexLJJrm8xl1sMPFggR3fDL9xCzyoq7Ruws5kdIYcumaZ/s6Bg==
+"@farcaster/core@0.14.11":
+  version "0.14.11"
+  resolved "https://registry.yarnpkg.com/@farcaster/core/-/core-0.14.11.tgz#ccc1b7d3ba0135d70cea690655e050ef679a454b"
+  integrity sha512-QyN1GR8cR37h0UzPl3b8X+JZx2ua8Lim8JyTD0xWpCNHX3s10nSqvFgbEDpaPNuM9Nl7YAnyW+EPoLGbEe9RMA==
   dependencies:
     "@noble/curves" "^1.0.0"
     "@noble/hashes" "^1.3.0"
@@ -138,12 +138,17 @@
     neverthrow "^6.0.0"
     viem "^1.12.2"
 
-"@farcaster/hub-nodejs@^0.11.9":
-  version "0.11.9"
-  resolved "https://registry.yarnpkg.com/@farcaster/hub-nodejs/-/hub-nodejs-0.11.9.tgz#f3e7d130b4c4463fa5fcdb0ef664f023a8a92798"
-  integrity sha512-ns3j2VZ3vuumXO27gj+HFDeydQkJfcnxyg+BTbL3WsZMipARUqGxRGAimV1gDuJLchYgnc0Ypzor1i5s0t8T+w==
+"@farcaster/hot-shots@^10.0.0":
+  version "10.0.0"
+  resolved "https://registry.npmjs.org/@farcaster/hot-shots/-/hot-shots-10.0.0.tgz#6a2f4374c19bb69c0cd271be36f90cfc3bd10d74"
+  integrity sha512-wVbdYvZL41SuCOFOUPsso16Ld/CZtjhVE0dJr8xgR2AygniI7YR9a9lmtIZS94/LUxL84JLCAkUJzTIpPKCagQ==
+
+"@farcaster/hub-nodejs@^0.11.10":
+  version "0.11.11"
+  resolved "https://registry.yarnpkg.com/@farcaster/hub-nodejs/-/hub-nodejs-0.11.11.tgz#52460ee06c0fcca0f64425c285c92acf150b73d6"
+  integrity sha512-lX7UxJBcVaaPWpw/SMk732irKMv7USMN10/7UBBXAI/y4obUY2svMB6Mk/w0tXHUOdeAF4NHaZGjpf63aCS1GA==
   dependencies:
-    "@farcaster/core" "0.14.9"
+    "@farcaster/core" "0.14.11"
     "@grpc/grpc-js" "~1.8.21"
     "@noble/hashes" "^1.3.0"
     neverthrow "^6.0.0"
@@ -656,6 +661,11 @@ lodash.isarguments@^3.1.0:
   resolved "https://registry.yarnpkg.com/lodash.isarguments/-/lodash.isarguments-3.1.0.tgz#2f573d85c6a24289ff00663b491c1d338ff3458a"
   integrity sha512-chi4NHZlZqZD18a0imDHnZPrDeBbTtVN7GXMwuGdRH9qotxAjYs3aVLKc7zNOG9eddR5Ksd8rvFEBc9SsggPpg==
 
+lodash@^4.17.11:
+  version "4.17.21"
+  resolved "https://registry.yarnpkg.com/lodash/-/lodash-4.17.21.tgz#679591c564c3bffaae8454cf0b3df370c3d6911c"
+  integrity sha512-v2kDEe57lecTulaDIuNTPy3Ry4gLGJ6Z1O3vE1krgXZNrsQ+LFTGHVxVjcXPs17LhbZVGedAJv8XZ1tvj5FvSg==
+
 long@^5.0.0:
   version "5.2.3"
   resolved "https://registry.yarnpkg.com/long/-/long-5.2.3.tgz#a3ba97f3877cf1d778eccbcb048525ebb77499e1"
@@ -1003,6 +1013,13 @@ redis-errors@^1.0.0, redis-errors@^1.2.0:
   version "1.2.0"
   resolved "https://registry.yarnpkg.com/redis-errors/-/redis-errors-1.2.0.tgz#eb62d2adb15e4eaf4610c04afe1529384250abad"
   integrity sha512-1qny3OExCf0UvUV/5wpYKf2YwPcOqXzkwKKSmKHiE6ZMQs5heeE/c8eXK+PNllPvmjgAbfnsbpkGZWy8cBpn9w==
+
+redis-info@^3.0.8:
+  version "3.1.0"
+  resolved "https://registry.yarnpkg.com/redis-info/-/redis-info-3.1.0.tgz#5e349c8720e82d27ac84c73136dce0931e10469a"
+  integrity sha512-ER4L9Sh/vm63DkIE0bkSjxluQlioBiBgf5w1UuldaW/3vPcecdljVDisZhmnCMvsxHNiARTTDDHGg9cGwTfrKg==
+  dependencies:
+    lodash "^4.17.11"
 
 redis-parser@^3.0.0:
   version "3.0.0"

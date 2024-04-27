@@ -4,7 +4,8 @@
   "license": "MIT",
   "dependencies": {
     "@commander-js/extra-typings": "^12.0.1",
-    "@farcaster/hub-nodejs": "^0.11.9",
+    "@farcaster/hot-shots": "^10.0.0",
+    "@farcaster/hub-nodejs": "^0.11.10",
     "@farcaster/shuttle": "^0.2.0",
     "@figma/hot-shots": "^9.0.0-figma.1",
     "bullmq": "^5.7.4",
