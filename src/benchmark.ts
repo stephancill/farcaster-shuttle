@@ -94,6 +94,8 @@ if (
     const elapsed = (Date.now() - start) / 1000;
     log.info(`Reconciled ${fids.length} in ${elapsed}s`);
 
+    await app.urlIndexer.start()
+
     const unbatchWorker = getUnbatchWorker(app.redis.client);
     unbatchWorker.run();
     log.info("Unbatch worker started");
@@ -138,15 +140,15 @@ if (
     .version(JSON.parse(readFileSync("./package.json").toString()).version);
 
   program
-    .command("bench-reconcile")
+    .command("reconcile")
     .description("Benchmark reconcile")
     .action(benchmarkSingleFid);
   program
-    .command("bench-backfill")
+    .command("backfill")
     .description("Benchmark backfill")
     .action(benchmarkBackfill);
   program
-    .command("bench-index-urls")
+    .command("index-urls")
     .description("Benchmark index urls")
     .action(benchmarkIndexUrlsSingleFidReconcile);
   program

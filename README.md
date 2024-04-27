@@ -19,15 +19,16 @@ However, database schema is stable and will not change (except for addition of n
 * Tests run on an MacBook M1 Pro
 
 ```
-docker-compose down -v && docker-compose up -d && FIDS=3 yarn start bench-reconcile
+docker-compose down -v && docker-compose up -d && FIDS=3 yarn benchmark reconcile
 ```
 
 ```
-docker-compose down -v && docker-compose up -d && MAX_FID=1000 CONCURRENCY=8 yarn start bench-backfill
+docker-compose down -v && docker-compose up -d && MAX_FID=1000 CONCURRENCY=8 yarn benchmark backfill
 ```
 
 Remaining issues
 - Subscriber deadlocks
+- Subscriber not working
 - Reconciler only fetches add messages, not deletes/prunes
 
 ## Architecture

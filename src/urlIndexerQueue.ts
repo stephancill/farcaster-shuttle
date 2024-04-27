@@ -22,10 +22,12 @@ class FetchFailedError extends Error {
   }
 }
 
-export class IndexerQueue {
+export class URLIndexerQueue {
   private indexQueue: queueAsPromised<Job>;
   private startTime: Date | undefined;
   private jobsCompleted = 0;
+  private backlog: Job[] = [];
+  private started = false;
 
   constructor(private db: AppDb, private log: Logger) {
     this.log.info(
@@ -37,14 +39,27 @@ export class IndexerQueue {
   }
 
   public async push(url: string) {
-    await this.indexQueue.push({ url });
+    if (this.started) {
+      await this.indexQueue.push({ url });
+    } else {
+      this.backlog.push({ url });
+    }
   }
 
   public async start() {
+    this.started = true;
     await this.populateQueue();
+    this.startTime = new Date();
+  }
+
+  public async stop() {
+    this.started = false;
+    this.indexQueue.kill();
   }
 
   private async populateQueue() {
+    this.backlog.map((job) => this.indexQueue.push(job));
+
     if (this.indexQueue.length() > 0) return;
 
     // select urls from CastEmbedUrl which don't exist on the UrlMetadata table
@@ -58,7 +73,6 @@ export class IndexerQueue {
     //   OR url_metadata.; `.execute(this.db);
     const rowsToIndex = await (this.db as unknown as AppDb)
       .selectFrom("castEmbedUrls")
-      .select(["url"])
       .leftJoin("urlMetadata", "castEmbedUrls.url", "urlMetadata.url")
       .where("urlMetadata.url", "is", null)
       .where(
@@ -66,9 +80,10 @@ export class IndexerQueue {
         "<",
         new Date(Date.now() - 24 * 60 * 60 * 1000)
       )
+      .select(["urlMetadata.url"])
       .execute();
 
-    rowsToIndex.map((row) => this.indexQueue.push(row));
+    rowsToIndex.forEach(({ url }) => url && this.indexQueue.push({ url }));
 
     this.log.info(`[URL Indexer] Found ${rowsToIndex.length} URLs to index`);
 
@@ -94,7 +109,8 @@ export class IndexerQueue {
       "instagram.com",
       "facebook.com",
       "reddit.com",
-      "tiktok",
+      "tiktok.com",
+      "imagedelivery.net"
     ];
     try {
       const parsedUrl = new URL(url);

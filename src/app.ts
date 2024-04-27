@@ -33,7 +33,7 @@ import { getFrame, getFrameFlattened } from "frames.js";
 import ogs from "open-graph-scraper";
 import normalizeUrl from "./normalizeUrl";
 import { INDEX_URL_JOB_NAME, UNBATCH_JOB_NAME, getUnbatchWorker, getUrlBatchQueue, getUrlQueue, getUrlWorker } from "./urlWorker";
-import { IndexerQueue } from "./indexerQueue";
+import { URLIndexerQueue } from "./urlIndexerQueue";
 
 
 const hubId = "shuttle";
@@ -44,9 +44,9 @@ export class App implements MessageHandler {
   private streamConsumer: HubEventStreamConsumer;
   public redis: RedisClient;
   private readonly hubId;
-  public urlIndexer: IndexerQueue;
+  public urlIndexer: URLIndexerQueue;
 
-  constructor(db: DB, redis: RedisClient, hubSubscriber: HubSubscriber, streamConsumer: HubEventStreamConsumer, urlIndexer: IndexerQueue) {
+  constructor(db: DB, redis: RedisClient, hubSubscriber: HubSubscriber, streamConsumer: HubEventStreamConsumer, urlIndexer: URLIndexerQueue) {
     this.db = db;
     this.redis = redis;
     this.hubSubscriber = hubSubscriber;
@@ -63,7 +63,7 @@ export class App implements MessageHandler {
     const eventStreamForRead = new EventStreamConnection(redis.client);
     const hubSubscriber = new EventStreamHubSubscriber(hubId, hub, eventStreamForWrite, redis, "all", log);
     const streamConsumer = new HubEventStreamConsumer(hub, eventStreamForRead, "all");
-    const urlIndexer = new IndexerQueue(db as unknown as AppDb, log);
+    const urlIndexer = new URLIndexerQueue(db as unknown as AppDb, log);
 
     return new App(db, redis, hubSubscriber, streamConsumer, urlIndexer);
   }
@@ -162,7 +162,7 @@ export class App implements MessageHandler {
   async processCastEmbeds(
     messages: Message[],
     db: AppDb,
-    urlQueue: IndexerQueue
+    urlQueue: URLIndexerQueue
   ) {
     const castAddMessages = messages.filter(isCastAddMessage);
     const urlEmbeds = castAddMessages
@@ -177,14 +177,14 @@ export class App implements MessageHandler {
 
     let start = Date.now();
 
-    await db.insertInto("castEmbedUrls").values(urlEmbeds.map(({ embed, castHash }) => {
-      return {
-        castHash,
-        url: embed.url!,
-      };
-    })).execute()
-
-    log.info(`Inserted ${urlEmbeds.length} cast embeds in ${Date.now() - start}ms`);
+    if (urlEmbeds.length > 0) {
+      await db.insertInto("castEmbedUrls").values(urlEmbeds.map(({ embed, castHash }) => {
+        return {
+          castHash,
+          url: embed.url!,
+        };
+      })).execute()
+    };
   }
 
   async backfillFids(fids: number[], backfillQueue: Queue) {
@@ -268,6 +268,7 @@ if (import.meta.url.endsWith(url.pathToFileURL(process.argv[1] || "").toString()
     unbatchWorker.run();
     log.info("Unbatch worker started");
     const worker = getUrlWorker(app, app.redis.client, log, FETCH_CONCURRENCY);
+    await app.urlIndexer.start()
     await worker.run();
   }
 
