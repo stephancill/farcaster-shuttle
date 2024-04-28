@@ -18,4 +18,4 @@ export const STATSD_HOST = process.env["STATSD_HOST"];
 export const STATSD_METRICS_PREFIX = process.env["STATSD_METRICS_PREFIX"] || "shuttle.";
 
 export const CONCURRENCY = parseInt(process.env["CONCURRENCY"] || "2");
-export const FETCH_CONCURRENCY = parseInt(process.env["CONCURRENCY"] || "2");
+export const FETCH_CONCURRENCY = parseInt(process.env["FETCH_CONCURRENCY"] || "2");

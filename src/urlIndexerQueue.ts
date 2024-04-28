@@ -28,6 +28,7 @@ export class URLIndexerQueue {
   private jobsCompleted = 0;
   private backlog: Job[] = [];
   private started = false;
+  private populateQueueInterval: NodeJS.Timeout | null = null;
 
   constructor(private db: AppDb, private log: Logger) {
     this.log.info(
@@ -48,13 +49,22 @@ export class URLIndexerQueue {
 
   public async start() {
     this.started = true;
-    await this.populateQueue();
+    this.populateQueue();
     this.startTime = new Date();
+
+    // Populate queue every 10 seconds
+    this.populateQueueInterval = setInterval(
+      () => this.populateQueue(),
+      10 * 1000
+    );
   }
 
   public async stop() {
     this.started = false;
     this.indexQueue.kill();
+    if (this.populateQueueInterval) {
+      clearInterval(this.populateQueueInterval);
+    }
   }
 
   private async populateQueue() {
@@ -74,22 +84,27 @@ export class URLIndexerQueue {
     const rowsToIndex = await (this.db as unknown as AppDb)
       .selectFrom("castEmbedUrls")
       .leftJoin("urlMetadata", "castEmbedUrls.url", "urlMetadata.url")
-      .where("urlMetadata.url", "is", null)
-      .where(
-        "urlMetadata.updatedAt",
-        "<",
-        new Date(Date.now() - 24 * 60 * 60 * 1000)
+      .where((eb) =>
+        eb.or([
+          eb("urlMetadata.updatedAt", "is", null),
+          eb(
+            "urlMetadata.updatedAt",
+            "<",
+            new Date(Date.now() - 24 * 60 * 60 * 1000)
+          ),
+        ])
       )
-      .select(["urlMetadata.url"])
+      .select(["castEmbedUrls.url"])
       .execute();
 
-    rowsToIndex.forEach(({ url }) => url && this.indexQueue.push({ url }));
+    const currentQueueUrls = this.indexQueue.getQueue().map((job) => job.url);
+
+    rowsToIndex.forEach(
+      ({ url }) =>
+        url && !currentQueueUrls.includes(url) && this.indexQueue.push({ url })
+    );
 
     this.log.info(`[URL Indexer] Found ${rowsToIndex.length} URLs to index`);
-
-    this.log.info(
-      `[URL Indexer] Queued ${this.indexQueue.length()} URLs for indexing`
-    );
   }
 
   private async worker({ url, retries = 0 }: Job): Promise<void> {
@@ -110,7 +125,7 @@ export class URLIndexerQueue {
       "facebook.com",
       "reddit.com",
       "tiktok.com",
-      "imagedelivery.net"
+      "imagedelivery.net",
     ];
     try {
       const parsedUrl = new URL(url);
@@ -129,7 +144,7 @@ export class URLIndexerQueue {
     const alreadyIndexed = await appDB
       .selectFrom("urlMetadata")
       .where("url", "=", url)
-      .where("updatedAt", ">", new Date(Date.now() - 24 * 60 * 60 * 1000))
+      .where("updatedAt", "<", new Date(Date.now() - 24 * 60 * 60 * 1000))
       .execute()
       .then((res) => res.length > 0);
 

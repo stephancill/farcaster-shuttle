@@ -29,11 +29,8 @@ import { deleteVerifications, insertVerifications } from "./processors/verificat
 import { insertUserDatas } from "./processors/user-data";
 import { deleteReactions, insertReactions } from "./processors/reaction";
 import { deleteLinks, insertLinks } from "./processors/link";
-import { getFrame, getFrameFlattened } from "frames.js";
-import ogs from "open-graph-scraper";
-import normalizeUrl from "./normalizeUrl";
-import { INDEX_URL_JOB_NAME, UNBATCH_JOB_NAME, getUnbatchWorker, getUrlBatchQueue, getUrlQueue, getUrlWorker } from "./urlWorker";
 import { URLIndexerQueue } from "./urlIndexerQueue";
+import { insertEmbeds } from "./processors/embeds";
 
 
 const hubId = "shuttle";
@@ -71,7 +68,7 @@ export class App implements MessageHandler {
   async processMessagesOfType(messages: Message[], type: MessageType, db: AppDb): Promise<void> {
     if (type === MessageType.CAST_ADD) {
       await insertCasts(messages, db)
-      await this.processCastEmbeds(messages, db, this.urlIndexer)
+      await insertEmbeds(messages, db)
     } else if (type === MessageType.CAST_REMOVE) {
       await deleteCasts(messages, db)
     } else if (type === MessageType.VERIFICATION_ADD_ETH_ADDRESS) {
@@ -159,33 +156,7 @@ export class App implements MessageHandler {
     }
   }
 
-  async processCastEmbeds(
-    messages: Message[],
-    db: AppDb,
-    urlQueue: URLIndexerQueue
-  ) {
-    const castAddMessages = messages.filter(isCastAddMessage);
-    const urlEmbeds = castAddMessages
-    .map((msg) => msg.data?.castAddBody?.embeds.map(e => ({castHash: msg.hash, embed: e})) || [])
-    .flat()
-    .filter(({embed}) => "url" in embed && embed.url)
-
-    await Promise.all(
-      urlEmbeds
-        .map(async ({ embed }) => await urlQueue.push(embed.url!))
-    );
-
-    let start = Date.now();
-
-    if (urlEmbeds.length > 0) {
-      await db.insertInto("castEmbedUrls").values(urlEmbeds.map(({ embed, castHash }) => {
-        return {
-          castHash,
-          url: embed.url!,
-        };
-      })).execute()
-    };
-  }
+  
 
   async backfillFids(fids: number[], backfillQueue: Queue) {
     await this.ensureMigrations();
@@ -264,12 +235,8 @@ if (import.meta.url.endsWith(url.pathToFileURL(process.argv[1] || "").toString()
   async function urlWorker() {
     log.info(`Creating app connecting to: ${POSTGRES_URL}, ${REDIS_URL}, ${HUB_HOST}`);
     const app = App.create(POSTGRES_URL, REDIS_URL, HUB_HOST, HUB_SSL);
-    const unbatchWorker = getUnbatchWorker(app.redis.client);
-    unbatchWorker.run();
     log.info("Unbatch worker started");
-    const worker = getUrlWorker(app, app.redis.client, log, FETCH_CONCURRENCY);
-    await app.urlIndexer.start()
-    await worker.run();
+    app.urlIndexer.start()
   }
 
   // for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {

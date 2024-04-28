@@ -35,9 +35,7 @@ export const up = async (db: Kysely<any>) => {
     .addColumn("createdAt", "timestamptz", (col) =>
       col.notNull().defaultTo(sql`current_timestamp`)
     )
-    .addColumn("updatedAt", "timestamptz", (col) =>
-      col.notNull().defaultTo(sql`current_timestamp`)
-    )
+    .addColumn("updatedAt", "timestamptz")
     .addColumn("responseStatus", "integer")
     .addColumn("opengraph", "jsonb")
     .addColumn("frameFlattened", "jsonb")
