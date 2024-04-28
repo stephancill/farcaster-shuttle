@@ -77,6 +77,8 @@ export class HubEventProcessor {
           await handler.handleMessageMerge(deletedMessage, trx, "delete", state, isNew, wasMissed);
         }
       }
+    });
+    await db.transaction().execute(async (trx) => {
       const isNew = await MessageProcessor.storeMessage(message, trx, operation, log);
       if (isNew === null)
         return;
