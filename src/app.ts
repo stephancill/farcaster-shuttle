@@ -78,7 +78,7 @@ export class App implements MessageHandler {
       redis,
       shardKey,
       log,
-      null,
+      undefined,
       totalShards,
       shardIndex,
     );
@@ -257,7 +257,7 @@ if (import.meta.url.endsWith(url.pathToFileURL(process.argv[1] || "").toString()
 
   async function benchmarkSingleFid() {
     log.info(`Creating app connecting to: ${POSTGRES_URL}, ${REDIS_URL}, ${HUB_HOST}`);
-    const app = App.create(POSTGRES_URL, REDIS_URL, HUB_HOST, HUB_SSL);
+    const app = App.create(POSTGRES_URL, REDIS_URL, HUB_HOST, TOTAL_SHARDS, SHARD_INDEX, HUB_SSL);
     await app.ensureMigrations();
     const fids = BACKFILL_FIDS ? BACKFILL_FIDS.split(",").map((fid) => parseInt(fid)) : [];
     log.info(`Benchmarking fids: ${fids}`);
@@ -273,7 +273,7 @@ if (import.meta.url.endsWith(url.pathToFileURL(process.argv[1] || "").toString()
 
   async function benchmarkBackfill() {
     log.info(`Creating app connecting to: ${POSTGRES_URL}, ${REDIS_URL}, ${HUB_HOST}`);
-    const app = App.create(POSTGRES_URL, REDIS_URL, HUB_HOST, HUB_SSL);
+    const app = App.create(POSTGRES_URL, REDIS_URL, HUB_HOST, TOTAL_SHARDS, SHARD_INDEX, HUB_SSL);
     await app.ensureMigrations();
     const fids = BACKFILL_FIDS ? BACKFILL_FIDS.split(",").map((fid) => parseInt(fid)) : [];
     log.info(`Benchmarking backfill fids: ${fids}`);
