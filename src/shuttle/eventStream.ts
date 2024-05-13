@@ -1,4 +1,10 @@
-import { Cluster, ClusterOptions, Redis, RedisOptions, ReplyError } from "ioredis";
+import {
+  Cluster,
+  ClusterOptions,
+  Redis,
+  RedisOptions,
+  ReplyError,
+} from "ioredis";
 import { getHubEventCacheKey, HubClient } from "./hub";
 import { inBatchesOf, sleep } from "../utils";
 import { statsd } from "../statsd";
@@ -44,11 +50,21 @@ export class EventStreamConnection {
   async createGroup(key: string, consumerGroup: string) {
     try {
       // Check if the group already exists
-      const groups = (await this.client.xinfo("GROUPS", key)) as [string, string][];
-      if (groups.some(([_fieldName, groupName]) => groupName === consumerGroup)) return;
+      const groups = (await this.client.xinfo("GROUPS", key)) as [
+        string,
+        string
+      ][];
+      if (groups.some(([_fieldName, groupName]) => groupName === consumerGroup))
+        return;
 
       // Otherwise create the group
-      return await this.client.xgroup("CREATE", key, consumerGroup, "0", "MKSTREAM");
+      return await this.client.xgroup(
+        "CREATE",
+        key,
+        consumerGroup,
+        "0",
+        "MKSTREAM"
+      );
     } catch (e: unknown) {
       if (typeof e === "object" && e !== null && e instanceof ReplyError) {
         if ("message" in e && (e.message as string).startsWith("BUSYGROUP")) {
@@ -91,10 +107,12 @@ export class EventStreamConnection {
       count,
       "STREAMS",
       key,
-      ">",
+      ">"
     );
 
-    return result?.length && result[0].length ? this._extractEntries(result[0][1]) : [];
+    return result?.length && result[0].length
+      ? this._extractEntries(result[0][1])
+      : [];
   }
 
   // biome-ignore lint/suspicious/noExplicitAny: ignore
@@ -126,7 +144,15 @@ export class EventStreamConnection {
    * Useful for re-processing events that were never `ack`ed by a consumer.
    */
   async pending(key: string, consumerGroup: string, millis = 0, count = 1) {
-    const result = await this.client.xpending(key, consumerGroup, "IDLE", millis, "-", "+", count);
+    const result = await this.client.xpending(
+      key,
+      consumerGroup,
+      "IDLE",
+      millis,
+      "-",
+      "+",
+      count
+    );
     return result.map(
       // biome-ignore lint/suspicious/noExplicitAny: ignore
       ([id, , idleTime, deliveryCount]: any) =>
@@ -134,7 +160,7 @@ export class EventStreamConnection {
           id,
           idleTime,
           deliveryCount,
-        }) as { id: string; idleTime: number; deliveryCount: number },
+        } as { id: string; idleTime: number; deliveryCount: number })
     );
   }
 
@@ -154,7 +180,7 @@ export class EventStreamConnection {
       millis,
       "0-0",
       "COUNT",
-      count,
+      count
     );
 
     return this._extractEntries(result);
@@ -219,21 +245,26 @@ export class HubEventStreamConsumer {
     eventStream: EventStreamConnection,
     shardKey: string,
     options: EventStreamConsumerOptions = {},
-    logger: pino.Logger = log,
+    logger: pino.Logger = log
   ) {
     this.hub = hub;
     this.stream = eventStream;
     this.streamKey = `hub:${this.hub.host}:evt:msg:${shardKey}`;
     this.groupName = options.groupName || GROUP_NAME;
     this.maxEventsPerFetch = options.maxEventsPerFetch || MAX_EVENTS_PER_FETCH;
-    this.messageProcessingConcurrency = options.messageProcessingConcurrency || MESSAGE_PROCESSING_CONCURRENCY;
-    this.eventProcessingTimeout = options.eventProcessingTimeout || EVENT_PROCESSING_TIMEOUT;
-    this.eventDeletionThreshold = options.eventDeletionThreshold || EVENT_DELETION_THRESHOLD;
+    this.messageProcessingConcurrency =
+      options.messageProcessingConcurrency || MESSAGE_PROCESSING_CONCURRENCY;
+    this.eventProcessingTimeout =
+      options.eventProcessingTimeout || EVENT_PROCESSING_TIMEOUT;
+    this.eventDeletionThreshold =
+      options.eventDeletionThreshold || EVENT_DELETION_THRESHOLD;
     this.shardKey = shardKey;
     this.log = logger;
   }
 
-  async start(onEvent: (event: HubEvent) => Promise<Result<ProcessResult, Error>>) {
+  async start(
+    onEvent: (event: HubEvent) => Promise<Result<ProcessResult, Error>>
+  ) {
     this.stopped = false;
     await this.stream.waitUntilReady();
     await this.stream.createGroup(this.streamKey, this.groupName);
@@ -244,12 +275,17 @@ export class HubEventStreamConsumer {
     this.stopped = true;
   }
 
-  private async _runLoop(onEvent: (event: HubEvent) => Promise<Result<ProcessResult, Error>>) {
+  private async _runLoop(
+    onEvent: (event: HubEvent) => Promise<Result<ProcessResult, Error>>
+  ) {
     while (!this.stopped) {
       try {
         const sizeStartTime = Date.now();
         const size = await this.stream.streamSize(this.streamKey);
-        statsd.gauge("hub.event.stream.size", size, { hub: this.hub.host, source: this.shardKey });
+        statsd.gauge("hub.event.stream.size", size, {
+          hub: this.hub.host,
+          source: this.shardKey,
+        });
         const sizeTime = Date.now() - sizeStartTime;
 
         statsd.timing("hub.event.stream.size_time", sizeTime, {
@@ -259,79 +295,111 @@ export class HubEventStreamConsumer {
         let eventsRead = 0;
 
         const startTime = Date.now();
-        const events = await this.stream.reserve(this.streamKey, this.groupName, this.maxEventsPerFetch);
+        const events = await this.stream.reserve(
+          this.streamKey,
+          this.groupName,
+          this.maxEventsPerFetch
+        );
         const reserveTime = Date.now() - startTime;
 
         statsd.timing("hub.event.stream.reserve_time", reserveTime, {
           hub: this.hub.host,
           source: this.shardKey,
         });
-        statsd.increment("hub.event.stream.reserve", { hub: this.hub.host, source: this.shardKey });
+        statsd.increment("hub.event.stream.reserve", {
+          hub: this.hub.host,
+          source: this.shardKey,
+        });
 
         eventsRead += events.length;
 
-        await inBatchesOf(events, this.messageProcessingConcurrency, async (batchedEvents) => {
-          const eventIdsProcessed: string[] = [];
-          await Promise.allSettled(
-            batchedEvents.map((event) =>
-              (async (streamEvent) => {
-                try {
-                  const dequeueDelay = Date.now() - Number(streamEvent.id.split("-")[0]);
-                  statsd.timing("hub.event.stream.dequeue_delay", dequeueDelay, {
-                    hub: this.hub.host,
-                    source: this.shardKey,
-                  });
+        await inBatchesOf(
+          events,
+          this.messageProcessingConcurrency,
+          async (batchedEvents) => {
+            const eventIdsProcessed: string[] = [];
+            await Promise.allSettled(
+              batchedEvents.map((event) =>
+                (async (streamEvent) => {
+                  try {
+                    const dequeueDelay =
+                      Date.now() - Number(streamEvent.id.split("-")[0]);
+                    statsd.timing(
+                      "hub.event.stream.dequeue_delay",
+                      dequeueDelay,
+                      {
+                        hub: this.hub.host,
+                        source: this.shardKey,
+                      }
+                    );
 
-                  const startTime = Date.now();
-                  const hubEvent = HubEvent.decode(streamEvent.data);
-                  const result = await onEvent(hubEvent);
-                  const processingTime = Date.now() - startTime;
-                  statsd.timing("hub.event.stream.time", processingTime, {
-                    hub: this.hub.host,
-                    source: this.shardKey,
-                    hubEventType: hubEvent.type.toString(),
-                  });
-
-                  if (result.isErr()) throw result.error;
-
-                  if (result.value.skipped) {
-                    statsd.increment("hub.event.stream.skipped", 1, {
-                      hub: this.hub.host,
-                      source: this.shardKey,
-                    });
-                  }
-                  eventIdsProcessed.push(streamEvent.id);
-
-                  if (!result.value.skipped) {
-                    const e2eTime = Date.now() - extractEventTimestamp(hubEvent.id);
-                    statsd.timing("hub.event.stream.e2e_time", e2eTime, {
+                    const startTime = Date.now();
+                    const hubEvent = HubEvent.decode(streamEvent.data);
+                    const result = await onEvent(hubEvent);
+                    const processingTime = Date.now() - startTime;
+                    statsd.timing("hub.event.stream.time", processingTime, {
                       hub: this.hub.host,
                       source: this.shardKey,
                       hubEventType: hubEvent.type.toString(),
                     });
+
+                    if (result.isErr()) throw result.error;
+
+                    if (result.value.skipped) {
+                      statsd.increment("hub.event.stream.skipped", 1, {
+                        hub: this.hub.host,
+                        source: this.shardKey,
+                      });
+                    }
+                    eventIdsProcessed.push(streamEvent.id);
+
+                    if (!result.value.skipped) {
+                      const e2eTime =
+                        Date.now() - extractEventTimestamp(hubEvent.id);
+                      statsd.timing("hub.event.stream.e2e_time", e2eTime, {
+                        hub: this.hub.host,
+                        source: this.shardKey,
+                        hubEventType: hubEvent.type.toString(),
+                      });
+                    }
+                  } catch (e: unknown) {
+                    statsd.increment("hub.event.stream.errors", {
+                      hub: this.hub.host,
+                      source: this.shardKey,
+                    });
+                    this.log.error(e); // Report and move on to next event
                   }
-                } catch (e: unknown) {
-                  statsd.increment("hub.event.stream.errors", { hub: this.hub.host, source: this.shardKey });
-                  this.log.error(e); // Report and move on to next event
+                })(event)
+              )
+            );
+
+            if (eventIdsProcessed.length) {
+              const startTime = Date.now();
+              await this.stream.ack(
+                this.streamKey,
+                this.groupName,
+                eventIdsProcessed
+              );
+              statsd.timing(
+                "hub.event.stream.ack_time",
+                Date.now() - startTime,
+                {
+                  hub: this.hub.host,
+                  source: this.shardKey,
                 }
-              })(event),
-            ),
-          );
+              );
 
-          if (eventIdsProcessed.length) {
-            const startTime = Date.now();
-            await this.stream.ack(this.streamKey, this.groupName, eventIdsProcessed);
-            statsd.timing("hub.event.stream.ack_time", Date.now() - startTime, {
-              hub: this.hub.host,
-              source: this.shardKey,
-            });
-
-            statsd.increment("hub.event.stream.ack", eventIdsProcessed.length, {
-              hub: this.hub.host,
-              source: this.shardKey,
-            });
+              statsd.increment(
+                "hub.event.stream.ack",
+                eventIdsProcessed.length,
+                {
+                  hub: this.hub.host,
+                  source: this.shardKey,
+                }
+              );
+            }
           }
-        });
+        );
 
         if (eventsRead === 0) {
           if (this.stopped) break;
@@ -345,7 +413,9 @@ export class HubEventStreamConsumer {
     }
   }
 
-  public async processStale(onEvent: (event: HubEvent) => Promise<Result<ProcessResult, Error>>) {
+  public async processStale(
+    onEvent: (event: HubEvent) => Promise<Result<ProcessResult, Error>>
+  ) {
     let totalStaleProcessed = 0;
 
     const startTime = Date.now();
@@ -353,7 +423,7 @@ export class HubEventStreamConsumer {
       this.streamKey,
       this.groupName,
       this.eventProcessingTimeout,
-      this.maxEventsPerFetch,
+      this.maxEventsPerFetch
     );
     statsd.timing("hub.event.stream.claim_stale_time", Date.now() - startTime, {
       hub: this.hub.host,
@@ -364,76 +434,101 @@ export class HubEventStreamConsumer {
       source: this.shardKey,
     });
 
-    await inBatchesOf(events, this.messageProcessingConcurrency, async (batchedEvents) => {
-      const eventIdsProcessed: string[] = [];
-      await Promise.allSettled(
-        batchedEvents.map((event) =>
-          (async (streamEvent) => {
-            try {
-              statsd.increment("hub.event.stream.stale.attempts", 1, {
-                hub: this.hub.host,
-                source: this.shardKey,
-              });
+    await inBatchesOf(
+      events,
+      this.messageProcessingConcurrency,
+      async (batchedEvents) => {
+        const eventIdsProcessed: string[] = [];
+        await Promise.allSettled(
+          batchedEvents.map((event) =>
+            (async (streamEvent) => {
+              try {
+                statsd.increment("hub.event.stream.stale.attempts", 1, {
+                  hub: this.hub.host,
+                  source: this.shardKey,
+                });
 
-              const dequeueDelay = Date.now() - Number(streamEvent.id.split("-")[0]);
-              statsd.timing("hub.event.stream.dequeue_delay", dequeueDelay, {
-                hub: this.hub.host,
-                source: this.shardKey,
-              });
+                const dequeueDelay =
+                  Date.now() - Number(streamEvent.id.split("-")[0]);
+                statsd.timing("hub.event.stream.dequeue_delay", dequeueDelay, {
+                  hub: this.hub.host,
+                  source: this.shardKey,
+                });
 
-              const startTime = Date.now();
-              const hubEvent = HubEvent.decode(streamEvent.data);
-              const result = await onEvent(hubEvent);
-              const processingTime = Date.now() - startTime;
-              statsd.timing("hub.event.stream.time", processingTime, {
-                hub: this.hub.host,
-                source: this.shardKey,
-              });
-              if (result.isErr()) throw result.error;
+                const startTime = Date.now();
+                const hubEvent = HubEvent.decode(streamEvent.data);
+                const result = await onEvent(hubEvent);
+                const processingTime = Date.now() - startTime;
+                statsd.timing("hub.event.stream.time", processingTime, {
+                  hub: this.hub.host,
+                  source: this.shardKey,
+                });
+                if (result.isErr()) throw result.error;
 
-              eventIdsProcessed.push(streamEvent.id);
+                eventIdsProcessed.push(streamEvent.id);
 
-              statsd.timing("hub.event.stream.e2e_time", Date.now() - extractEventTimestamp(hubEvent.id), {
-                hub: this.hub.host,
-                source: this.shardKey,
-              });
-            } catch (e: unknown) {
-              statsd.increment("hub.event.stream.errors", { hub: this.hub.host, source: this.shardKey });
-              this.log.error(e, "Error processing stale event"); // Report and move on to next event
+                statsd.timing(
+                  "hub.event.stream.e2e_time",
+                  Date.now() - extractEventTimestamp(hubEvent.id),
+                  {
+                    hub: this.hub.host,
+                    source: this.shardKey,
+                  }
+                );
+              } catch (e: unknown) {
+                statsd.increment("hub.event.stream.errors", {
+                  hub: this.hub.host,
+                  source: this.shardKey,
+                });
+                this.log.error(e, "Error processing stale event"); // Report and move on to next event
+              }
+            })(event)
+          )
+        );
+
+        // ACK all processed events in a single call
+        if (eventIdsProcessed.length) {
+          totalStaleProcessed += eventIdsProcessed.length;
+          const startTime = Date.now();
+          await this.stream.ack(
+            this.streamKey,
+            this.groupName,
+            eventIdsProcessed
+          );
+          statsd.timing("hub.event.stream.ack_time", Date.now() - startTime, {
+            hub: this.hub.host,
+            source: this.shardKey,
+          });
+
+          statsd.increment("hub.event.stream.ack", eventIdsProcessed.length, {
+            hub: this.hub.host,
+            source: this.shardKey,
+          });
+          statsd.increment(
+            "hub.event.stream.stale.processed",
+            eventIdsProcessed.length,
+            {
+              hub: this.hub.host,
+              source: this.shardKey,
             }
-          })(event),
-        ),
-      );
-
-      // ACK all processed events in a single call
-      if (eventIdsProcessed.length) {
-        totalStaleProcessed += eventIdsProcessed.length;
-        const startTime = Date.now();
-        await this.stream.ack(this.streamKey, this.groupName, eventIdsProcessed);
-        statsd.timing("hub.event.stream.ack_time", Date.now() - startTime, {
-          hub: this.hub.host,
-          source: this.shardKey,
-        });
-
-        statsd.increment("hub.event.stream.ack", eventIdsProcessed.length, {
-          hub: this.hub.host,
-          source: this.shardKey,
-        });
-        statsd.increment("hub.event.stream.stale.processed", eventIdsProcessed.length, {
-          hub: this.hub.host,
-          source: this.shardKey,
-        });
+          );
+        }
       }
-    });
+    );
 
     return totalStaleProcessed;
   }
 
   public async clearOldEvents() {
-    const deleteThresholdTimestamp = new Date(Date.now() - this.eventDeletionThreshold);
+    const deleteThresholdTimestamp = new Date(
+      Date.now() - this.eventDeletionThreshold
+    );
 
     const startTime = Date.now();
-    const eventsCleared = await this.stream.trim(this.streamKey, deleteThresholdTimestamp);
+    const eventsCleared = await this.stream.trim(
+      this.streamKey,
+      deleteThresholdTimestamp
+    );
     statsd.timing("hub.event.stream.trim_time", Date.now() - startTime, {
       hub: this.hub.host,
       source: this.shardKey,
