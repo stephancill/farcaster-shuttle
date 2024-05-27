@@ -1,4 +1,5 @@
 import pg from "pg";
+import { AuthTypes, Connector, IpAddressTypes } from '@google-cloud/cloud-sql-connector';
 import {
   CamelCasePlugin,
   DeleteQueryBuilder,
@@ -141,15 +142,39 @@ export interface HubTables {
   messages: MessagesTable;
 }
 
-export const getDbClient = (connectionString?: string) => {
+export const getDbClient = async (connectionString?: string, instanceConnectionName?: string, serviceAccount?: string, database?: string) => {
+  const connector = new Connector();
+  if (!connectionString) {
+    throw new Error('Connection string is required');
+  }
+  if (!instanceConnectionName) {
+    throw new Error('Instance connection name is required');
+  }
+
+  if (!serviceAccount) {
+    throw new Error('Service account is required');
+  }
+
+  const clientOpts = await connector.getOptions({
+    instanceConnectionName,
+    ipType: IpAddressTypes.PUBLIC,
+    authType: AuthTypes.IAM,
+  });
+
+  console.log(`instance: ${instanceConnectionName}, user: ${serviceAccount}, database: ${database}`);
+
+  const pool = new Pool({
+    ...clientOpts,
+    user: serviceAccount,
+    database,
+    max: 20,
+    query_timeout: 1_000_000,
+  });
+
+
   return new Kysely<HubTables>({
     dialect: new PostgresDialect({
-      pool: new Pool({
-        max: 20,
-        connectionString,
-        // long query timeouts required for many workers
-        query_timeout: 1_000_000, 
-      }),
+      pool,
       cursor: Cursor,
     }),
     plugins: [new CamelCasePlugin()],
