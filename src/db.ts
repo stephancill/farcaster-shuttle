@@ -12,8 +12,7 @@ import { err, ok, Result } from "neverthrow";
 import path from "path";
 import { promises as fs } from "fs";
 import { fileURLToPath } from "node:url";
-import { HubTables } from "@farcaster/shuttle";
-import { Fid, Hex } from "./shuttle";
+import { Fid, Hex, HubTables } from "./shuttle";
 import {
   ReactionType,
   UserDataType,
